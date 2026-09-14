@@ -1,5 +1,7 @@
 <div align="center">
 
+<a href="https://getrum.sh"><img src="assets/logo.svg" alt="rum logo" width="96" height="96"></a>
+
 # rum
 
 **An extremely fast RPM package manager, written in Rust.**
