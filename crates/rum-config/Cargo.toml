@@ -1,0 +1,10 @@
+[package]
+name = "rum-config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Configuration parsing for rum: dnf.conf / yum.conf and .repo files, with variable substitution."
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true

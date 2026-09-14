@@ -1,0 +1,13 @@
+[package]
+name = "rum-solve"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Version comparison (rpmvercmp) and dependency resolution primitives for rum."
+
+[dependencies]
+resolvo = { version = "0.12.1", features = ["version-ranges"] }
+version-ranges = "0.1"
+thiserror.workspace = true
+serde.workspace = true
+rkyv.workspace = true

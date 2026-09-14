@@ -1,0 +1,112 @@
+name: Release
+
+# Build and publish release binaries for every RPM era and CPU architecture
+# when changes land on main. rum links a specific librpm soname, so one binary
+# is NOT portable across RPM majors — we build one per era:
+#   el8  -> rpm 4.14, librpm.so.8   (RHEL/Oracle/Rocky/Alma 8)
+#   el9  -> rpm 4.16, librpm.so.9   (RHEL/Oracle/Rocky/Alma 9, Amazon Linux 2023)
+#   el10 -> rpm 4.19, librpm.so.10  (RHEL/Oracle/Alma 10)
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  # Build one tarball per (era x arch), on a native runner of that arch, inside
+  # a representative image of that era so the binary links the matching librpm.
+  build:
+    name: build (el${{ matrix.era.el }}, ${{ matrix.platform.arch }})
+    runs-on: ${{ matrix.platform.runner }}
+    container: ${{ matrix.era.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Two explicit dimensions so era x platform cross-products cleanly.
+        # (Mixing `include` with a base dimension collapses to last-wins.)
+        era:
+          # Oracle Linux images have been the most reliable across arches in CI
+          # (almalinux:9's aarch64 mirror flaked the el9 build). Binary is EL-era
+          # portable, so the build image just needs to match the librpm soname.
+          - { el: 8, image: "oraclelinux:8" }
+          - { el: 9, image: "oraclelinux:9" }
+          - { el: 10, image: "oraclelinux:10" }
+        platform:
+          - { arch: x86_64, runner: ubuntu-latest }
+          - { arch: aarch64, runner: ubuntu-24.04-arm }
+    steps:
+      - name: Install toolchain
+        run: |
+          set -eu
+          # Distro mirrors flake intermittently; retry so a transient dnf/network
+          # failure doesn't fail the whole (all-arches-required) release.
+          retry() { for i in 1 2 3; do "$@" && return 0; echo "attempt $i failed; retrying in 15s"; sleep 15; done; return 1; }
+          retry dnf install -y --allowerasing gcc rpm-devel popt-devel openssl-devel pkgconfig git tar gzip which findutils
+          # rustup for a uniform, MSRV-satisfying toolchain (distro rust on el8 lags).
+          retry sh -c "curl --proto =https --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - uses: actions/checkout@v4
+
+      - name: Build release
+        # RUM_BUILD is baked into `rum --version` (build.rs) so users can tell
+        # which release they have — the Cargo version alone never changes. It
+        # matches the release tag `v<version>.<run_number>`.
+        run: |
+          . "$HOME/.cargo/env"
+          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          export RUM_BUILD="v${version}.${{ github.run_number }}"
+          cargo build --release --workspace
+
+      - name: Package
+        run: |
+          . "$HOME/.cargo/env"
+          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          arch=$(uname -m)
+          name="rum-${version}-${arch}-el${{ matrix.era.el }}"
+          install -Dm755 target/release/rum "dist/${name}/rum"
+          cp README.md LICENSE "dist/${name}/" 2>/dev/null || true
+          tar -C dist -czf "${name}.tar.gz" "${name}"
+          sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rum-el${{ matrix.era.el }}-${{ matrix.platform.arch }}
+          path: |
+            rum-*.tar.gz
+            rum-*.tar.gz.sha256
+          if-no-files-found: error
+
+  # Publish a single release carrying every era's and architecture's assets.
+  # Split from build so the parallel build jobs don't race to create the release.
+  release:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        id: meta
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.meta.outputs.version }}.${{ github.run_number }}
+          name: rum v${{ steps.meta.outputs.version }} (build ${{ github.run_number }})
+          files: |
+            artifacts/rum-*.tar.gz
+            artifacts/rum-*.tar.gz.sha256
+          generate_release_notes: true

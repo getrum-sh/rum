@@ -1,0 +1,36 @@
+[package]
+name = "rum-repo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Repository metadata layer for rum: parallel fetch, checksum-verify, decompress and cache repomd/primary metadata."
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+rum-config.workspace = true
+rum-solve.workspace = true
+serde.workspace = true
+rkyv.workspace = true
+memmap2.workspace = true
+base64.workspace = true
+lasso.workspace = true
+
+# HTTP with a pure-Rust TLS stack (rustls), no OpenSSL/C.
+ureq = { version = "2", default-features = false, features = ["tls"] }
+# TLS client-certificate support (Red Hat RHUI mutual TLS).
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-pemfile = "2"
+webpki-roots = "0.26"
+# XML parsing for repomd.xml / primary.xml / metalink.
+quick-xml = "0.36"
+# Checksums referenced by repo metadata.
+sha2 = "0.10"
+sha1 = "0.10"
+hex = "0.4"
+# Pure-Rust decompressors for the three metadata encodings dnf repos use.
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+ruzstd = "0.7"
+lzma-rs = "0.3"
+

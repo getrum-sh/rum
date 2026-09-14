@@ -1,0 +1,105 @@
+name: OS Matrix
+
+# Build, test, and benchmark rum across every RPM era and CPU architecture we
+# support. rum links a specific librpm soname, so each RPM major is a distinct
+# target: EL8 (rpm 4.14, librpm.so.8, BerkeleyDB), EL9 (rpm 4.16, so.9, sqlite),
+# EL10 (rpm 4.19, so.10, sqlite). Runs on PRs to main, on demand, and weekly —
+# not on every push (the fast per-push checks live in ci.yml).
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  matrix:
+    name: ${{ matrix.image }} (${{ matrix.platform.arch }})
+    runs-on: ${{ matrix.platform.runner }}
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # One representative image per vendor and per librpm era.
+        image:
+          - amazonlinux:2023 # EL9 era, sqlite  (primary target)
+          - almalinux:9      # EL9 era, sqlite  (RHEL 9 proxy)
+          - almalinux:10     # EL10 era, sqlite (RHEL 10 proxy)
+          - oraclelinux:8    # EL8 era, BerkeleyDB, rpm 4.14
+          - oraclelinux:9    # EL9 era, sqlite  (Oracle Linux)
+        platform:
+          - { arch: x86_64, runner: ubuntu-latest }
+          - { arch: aarch64, runner: ubuntu-24.04-arm }
+    steps:
+      - name: Install toolchain
+        run: |
+          set -eu
+          # Distro mirrors flake intermittently; retry transient failures.
+          retry() { for i in 1 2 3; do "$@" && return 0; echo "attempt $i failed; retrying in 15s"; sleep 15; done; return 1; }
+          # curl-minimal ships in the base images; add build deps. --allowerasing
+          # avoids the curl/curl-minimal conflict some images hit.
+          retry dnf install -y --allowerasing gcc rpm-devel git tar gzip which findutils diffutils rpm-build createrepo_c python3
+          # Use rustup for a uniform, MSRV-satisfying toolchain across distros
+          # whose packaged rust may lag rum's MSRV.
+          retry sh -c "curl --proto =https --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - uses: actions/checkout@v4
+
+      - name: Environment
+        run: |
+          . "$HOME/.cargo/env"
+          echo "distro : $(cat /etc/system-release 2>/dev/null || grep -h PRETTY_NAME /etc/os-release)"
+          echo "rpm    : $(rpm --version | awk '{print $3}'), backend=$(rpm -E %{_db_backend})"
+          echo "cargo  : $(cargo --version)"
+
+      - name: Build
+        run: |
+          . "$HOME/.cargo/env"
+          cargo build --release --workspace
+
+      - name: Unit tests
+        run: |
+          . "$HOME/.cargo/env"
+          cargo test --workspace
+
+      - name: Coexistence / idempotency (real rpm transactions)
+        # Amazon Linux 2023's repos are served region/CDN-gated and are
+        # unreliable to reach from GitHub's (Azure-hosted, non-EC2) runners, so
+        # the `dnf install` this test needs can fail there for reasons unrelated
+        # to rum. The invariant is validated on real AL2023 EC2 and in local
+        # containers, so keep it informational for that image only.
+        continue-on-error: ${{ matrix.image == 'amazonlinux:2023' }}
+        run: RUM=target/release/rum bash tests/integration/coexistence.sh
+
+      - name: Erase-aware scoped-present resolution test
+        continue-on-error: ${{ matrix.image == 'amazonlinux:2023' }}
+        run: RUM=target/release/rum bash tests/integration/erase.sh
+
+      - name: Benchmark rum vs dnf (informational)
+        run: |
+          RUM=target/release/rum
+          t() { s=$(date +%s.%N); "$@" >/dev/null 2>&1 || true; e=$(date +%s.%N); awk "BEGIN{printf \"%.2f\", $e-$s}"; }
+
+          # Cold metadata refresh.
+          dnf clean all >/dev/null 2>&1 || true; $RUM clean all >/dev/null 2>&1 || true
+          dnf_mc=$(t dnf makecache)
+          $RUM clean all >/dev/null 2>&1 || true
+          rum_mc=$(t $RUM makecache)
+
+          # Warm listing of available packages.
+          dnf_ls=$(t dnf list --available)
+          rum_ls=$(t $RUM list available)
+
+          {
+            echo "### ${{ matrix.image }} (${{ matrix.platform.arch }})"
+            echo "rpm $(rpm --version | awk '{print $3}'), backend=$(rpm -E %{_db_backend})"
+            echo ""
+            echo "| Operation | dnf (s) | rum (s) |"
+            echo "|---|---:|---:|"
+            echo "| makecache (cold) | ${dnf_mc} | ${rum_mc} |"
+            echo "| list available (warm) | ${dnf_ls} | ${rum_ls} |"
+          } >> "$GITHUB_STEP_SUMMARY"

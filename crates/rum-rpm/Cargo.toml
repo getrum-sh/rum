@@ -1,0 +1,11 @@
+[package]
+name = "rum-rpm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Read-only rpmdb access for rum via FFI to the system librpm. Works across sqlite and BerkeleyDB backends."
+build = "build.rs"
+
+[dependencies]
+thiserror.workspace = true
+tracing.workspace = true

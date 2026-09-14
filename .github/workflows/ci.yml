@@ -1,0 +1,84 @@
+name: CI
+
+# Test on every push to a feature branch and on PRs targeting main.
+on:
+  push:
+    branches-ignore:
+      - main
+  pull_request:
+    branches:
+      - main
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  test:
+    name: build & test (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      # rum-rpm links against the system librpm/librpmio via FFI.
+      - name: Install librpm
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y librpm-dev pkg-config
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Formatting is arch-independent; check it once on x86_64.
+      - name: Format
+        if: matrix.arch == 'x86_64'
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features
+
+      - name: Test
+        run: cargo test --all --all-features
+
+  # Real-RPM-system integration test: rum coexists with dnf/yum on a shared
+  # rpmdb (a dnf-installed package is seen by rum and not reinstalled; rum's
+  # own install/remove are real rpm transactions). Runs in a RockyLinux
+  # container (multi-arch image) on both architectures because it needs a
+  # working rpmdb, dnf, and the distro repos.
+  integration:
+    name: coexistence (RockyLinux 9, ${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    container: rockylinux:9
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Install toolchain
+        run: dnf install -y gcc rpm-devel cargo rust git tar rpm-build createrepo_c python3
+
+      - uses: actions/checkout@v4
+
+      - name: Build rum
+        run: cargo build --release --bin rum
+
+      - name: Coexistence / idempotency test
+        run: RUM=./target/release/rum bash tests/integration/coexistence.sh
+
+      - name: Erase-aware scoped-present resolution test
+        run: RUM=./target/release/rum bash tests/integration/erase.sh

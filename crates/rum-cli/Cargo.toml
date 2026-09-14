@@ -1,0 +1,20 @@
+[package]
+name = "rum-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "rum command-line interface: a fast, parallel yum/dnf-compatible package manager frontend."
+
+[[bin]]
+name = "rum"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+rum-config.workspace = true
+rum-rpm.workspace = true
+rum-repo.workspace = true
+rum-solve.workspace = true

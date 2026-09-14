@@ -1,0 +1,9 @@
+/target
+**/*.rs.bk
+Cargo.lock.orig
+
+# local test-matrix host inventory (never commit private hosts)
+tests/integration/targets.local
+
+# local session notes / private scratchpads
+SESSION-NOTES*
