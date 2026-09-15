@@ -8,6 +8,7 @@
 mod commands;
 mod glob;
 mod sys;
+mod ui;
 
 use clap::{Parser, Subcommand};
 
@@ -43,6 +44,14 @@ struct Cli {
     /// Override configuration options (e.g. --setopt=install_weak_deps=0).
     #[arg(long = "setopt", global = true)]
     setopt: Vec<String>,
+
+    /// Enable specific repositories (comma-separated or repeated, e.g. --enablerepo=epel).
+    #[arg(long = "enablerepo", global = true)]
+    enablerepo: Vec<String>,
+
+    /// Disable specific repositories (comma-separated or repeated, e.g. --disablerepo=testing).
+    #[arg(long = "disablerepo", global = true)]
+    disablerepo: Vec<String>,
 
     #[command(subcommand)]
     command: Command,
@@ -133,13 +142,19 @@ enum GroupAction {
 
 fn main() -> anyhow::Result<()> {
     reset_sigpipe();
+    ui::init_color();
     // Cap glibc malloc arenas before any threads spawn, so the resolve heap can
     // be reclaimed before the in-process rpm transaction (keeps large installs
     // within a small host's RAM).
     sys::bound_malloc_arenas();
     let cli = Cli::parse();
     init_tracing(cli.verbose);
-    sys::set_global_overrides(&cli.setopt, cli.no_weak_deps);
+    sys::set_global_overrides(
+        &cli.setopt,
+        cli.no_weak_deps,
+        &cli.enablerepo,
+        &cli.disablerepo,
+    );
 
     // --assumeno overrides --assumeyes for state-changing operations.
     let assume_yes = cli.assume_yes && !cli.assume_no;

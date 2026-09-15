@@ -25,14 +25,16 @@ pub fn run(packages: &[String], with_deps: bool, destdir: &Path) -> anyhow::Resu
         return Ok(());
     }
     println!(
-        "Downloading {} package(s), {} total, to {}",
+        "{} Downloading {} package(s), {} total, to {}",
+        crate::ui::cyan("⠋"),
         resolution.ids.len(),
         human(resolution.total_bytes()),
         destdir.display()
     );
     let fetched = fetch(&resolution, destdir)?;
     println!(
-        "\nDownloaded {} package(s), {} in {:.2}s.",
+        "{} Downloaded {} package(s), {} in {:.2}s.",
+        crate::ui::bold_green("✔"),
         fetched.files.len(),
         human(fetched.total_bytes),
         fetched.elapsed.as_secs_f64()

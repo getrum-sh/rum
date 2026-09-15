@@ -84,7 +84,7 @@ fn commit_remove_native(packages: &[String]) -> anyhow::Result<()> {
         tx.add_erase(p).map_err(|e| anyhow::anyhow!("{e}"))?;
     }
     tx.run(false).map_err(|e| anyhow::anyhow!("{e}"))?;
-    println!("Complete!");
+    println!("{} Complete!", crate::ui::bold_green("✔"));
     Ok(())
 }
 
@@ -100,7 +100,7 @@ fn commit_remove_rpm_binary(packages: &[String]) -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("failed to launch rpm: {e}"))?;
 
     if status.success() {
-        println!("Complete!");
+        println!("{} Complete!", crate::ui::bold_green("✔"));
         Ok(())
     } else {
         anyhow::bail!("rpm removal failed (exit {:?})", status.code())

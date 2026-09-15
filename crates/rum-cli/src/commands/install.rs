@@ -56,9 +56,9 @@ pub fn execute_transaction(
     }
 
     if !upgrading.is_empty() {
-        println!("\nUpgrading {} package(s):", upgrading.len());
+        println!("\n{} {} package(s):", crate::ui::bold_cyan("Upgrading"), upgrading.len());
         for n in &upgrading {
-            println!("  {n}");
+            println!("  {} {n}", crate::ui::cyan("▲"));
         }
     }
 
@@ -68,9 +68,9 @@ pub fn execute_transaction(
         } else {
             "Installing"
         };
-        println!("\n{} {} package(s):", label, installing.len());
+        println!("\n{} {} package(s):", crate::ui::bold_green(label), installing.len());
         for n in &installing {
-            println!("  {n}");
+            println!("  {} {n}", crate::ui::green("+"));
         }
     }
 
@@ -264,7 +264,7 @@ fn commit_install_native(
             .map_err(|e| anyhow::anyhow!("{e}"))?;
     }
     tx.run(false).map_err(|e| anyhow::anyhow!("{e}"))?;
-    println!("Complete!");
+    println!("{} Complete!", crate::ui::bold_green("✔"));
     Ok(())
 }
 
@@ -318,7 +318,7 @@ fn commit_install_rpm_binary(
             );
         }
     }
-    println!("Complete!");
+    println!("{} Complete!", crate::ui::bold_green("✔"));
     Ok(())
 }
 

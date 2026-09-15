@@ -11,18 +11,29 @@ use std::sync::RwLock;
 static GLOBAL_OVERRIDES: RwLock<GlobalOverrides> = RwLock::new(GlobalOverrides {
     setopts: Vec::new(),
     no_weak_deps: false,
+    enablerepos: Vec::new(),
+    disablerepos: Vec::new(),
 });
 
 struct GlobalOverrides {
     setopts: Vec<String>,
     no_weak_deps: bool,
+    enablerepos: Vec<String>,
+    disablerepos: Vec<String>,
 }
 
 /// Set process-global CLI overrides applied on every `load_config()`.
-pub fn set_global_overrides(setopts: &[String], no_weak_deps: bool) {
+pub fn set_global_overrides(
+    setopts: &[String],
+    no_weak_deps: bool,
+    enablerepo: &[String],
+    disablerepo: &[String],
+) {
     if let Ok(mut g) = GLOBAL_OVERRIDES.write() {
         g.setopts = setopts.to_vec();
         g.no_weak_deps = no_weak_deps;
+        g.enablerepos = enablerepo.to_vec();
+        g.disablerepos = disablerepo.to_vec();
     }
 }
 
@@ -47,6 +58,26 @@ fn apply_overrides(config: &mut Config) {
                             || v.eq_ignore_ascii_case("yes");
                     }
                     _ => {}
+                }
+            }
+        }
+        for item in &g.disablerepos {
+            for pat in item.split(',') {
+                let pat = pat.trim();
+                for r in &mut config.repos {
+                    if pat == "*" || r.id == pat || crate::glob::matches(pat, &r.id) {
+                        r.enabled = false;
+                    }
+                }
+            }
+        }
+        for item in &g.enablerepos {
+            for pat in item.split(',') {
+                let pat = pat.trim();
+                for r in &mut config.repos {
+                    if pat == "*" || r.id == pat || crate::glob::matches(pat, &r.id) {
+                        r.enabled = true;
+                    }
                 }
             }
         }
