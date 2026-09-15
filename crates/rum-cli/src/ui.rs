@@ -60,6 +60,22 @@ pub fn yellow(text: &str) -> String {
     }
 }
 
+pub fn red(text: &str) -> String {
+    if is_color_enabled() {
+        format!("\x1b[31m{text}\x1b[0m")
+    } else {
+        text.to_string()
+    }
+}
+
+pub fn bold_red(text: &str) -> String {
+    if is_color_enabled() {
+        format!("\x1b[1;31m{text}\x1b[0m")
+    } else {
+        text.to_string()
+    }
+}
+
 pub fn bold(text: &str) -> String {
     if is_color_enabled() {
         format!("\x1b[1m{text}\x1b[0m")

@@ -34,11 +34,12 @@ pub fn run(packages: &[String], assume_yes: bool, nodocs: bool) -> anyhow::Resul
         return Ok(());
     }
 
-    execute_transaction(&resolution, assume_yes, false, nodocs)
+    execute_transaction(&resolution, packages, assume_yes, false, nodocs)
 }
 
 pub fn execute_transaction(
     resolution: &download::Resolution,
+    targets: &[String],
     assume_yes: bool,
     is_upgrade: bool,
     nodocs: bool,

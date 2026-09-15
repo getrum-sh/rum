@@ -15,5 +15,5 @@ pub fn run(packages: &[String], assume_yes: bool, nodocs: bool) -> anyhow::Resul
         return Ok(());
     }
 
-    install::execute_transaction(&resolution, assume_yes, true, nodocs)
+    install::execute_transaction(&resolution, packages, assume_yes, true, nodocs)
 }
