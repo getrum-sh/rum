@@ -92,6 +92,7 @@ pub fn sync_enabled(force_refresh: bool) -> anyhow::Result<Synced> {
                 metas.push(md);
             }
             Err(e) => {
+                eprintln!("Warning: Failed to synchronize cache for repo '{id}': {e}");
                 tracing::warn!(repo = %id, "sync failed: {e}");
                 repos.push(RepoStat {
                     id,

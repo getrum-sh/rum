@@ -16,13 +16,20 @@ use rum_rpm::Transaction;
 
 pub fn run(packages: &[String], assume_yes: bool, nodocs: bool) -> anyhow::Result<()> {
     if packages.is_empty() {
-        anyhow::bail!("`rum install` needs at least one package name");
+        anyhow::bail!("Error: No packages specified");
     }
 
     // Resolve first (no download yet), so we can show the transaction and
     // confirm before fetching anything — matching dnf's order.
     let resolution = download::resolve_packages(packages, true)?;
     if resolution.is_empty() {
+        if let Ok(db) = rum_rpm::Rpmdb::open() {
+            for p in packages {
+                for m in db.by_name(p) {
+                    println!("Package \"{}\" is already installed.", m.nevra());
+                }
+            }
+        }
         println!("Nothing to do.");
         return Ok(());
     }

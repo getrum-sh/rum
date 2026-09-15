@@ -17,7 +17,7 @@ use rum_solve::{
 
 pub fn run(packages: &[String], with_deps: bool, destdir: &Path) -> anyhow::Result<()> {
     if packages.is_empty() {
-        anyhow::bail!("`rum download` needs at least one package name");
+        anyhow::bail!("Error: No packages specified");
     }
     let resolution = resolve_packages(packages, with_deps)?;
     if resolution.is_empty() {
@@ -320,7 +320,17 @@ fn resolve_internal_synced(
                     match best_match_views(spec, metas, &offsets, &allow) {
                         Some(g) if !gids.contains(&g) => gids.push(g),
                         Some(_) => {}
-                        None => anyhow::bail!("no package found matching `{spec}`"),
+                        None => {
+                            eprintln!("No match for argument: {spec}");
+                            let hints = suggest_similar(spec, metas);
+                            if !hints.is_empty() {
+                                eprintln!(
+                                    "Hint: Similar package(s) available in enabled repositories: {}",
+                                    hints.join(", ")
+                                );
+                            }
+                            anyhow::bail!("Error: Unable to find a match: {spec}");
+                        }
                     }
                 }
                 return Ok(gids);
@@ -350,7 +360,7 @@ fn resolve_internal_synced(
                     // extra provides on their owning packages, and retry once.
                     let wanted = unmet_file_requires_views(metas, &installed);
                     if wanted.is_empty() {
-                        return Err(anyhow::anyhow!("dependency resolution failed: {e}"));
+                        return Err(format_resolve_error(e, metas));
                     }
                     for (pkgid, files) in repo_sync::load_filelists(&wanted) {
                         extra.entry(pkgid).or_default().extend(files);
@@ -365,11 +375,10 @@ fn resolve_internal_synced(
                     };
                     let reachable = src.compute_reachable(targets, &installed, include_recommends);
                     src.reachable = Some(reachable);
-                    Ok(
-                        resolve_sat_with_opt(targets, &src, &installed, include_recommends)
-                            .map_err(|e| anyhow::anyhow!("dependency resolution failed: {e}"))?
-                            .to_install,
-                    )
+                    match resolve_sat_with_opt(targets, &src, &installed, include_recommends) {
+                        Ok(res) => Ok(res.to_install),
+                        Err(e) => Err(format_resolve_error(e, metas)),
+                    }
                 }
             }
         };
@@ -1304,6 +1313,85 @@ fn download_one(http: &Http, job: &Job) -> anyhow::Result<()> {
     }
     http.download_file(&job.url, &job.dest, Some(&job.checksum))
         .map_err(|e| anyhow::anyhow!("{e}"))
+}
+
+fn format_resolve_error(
+    err: rum_solve::ResolveError,
+    metas: &[rum_repo::RepoMetadata],
+) -> anyhow::Error {
+    match err {
+        rum_solve::ResolveError::NotFound(spec) => {
+            eprintln!("No match for argument: {spec}");
+            let hints = suggest_similar(&spec, metas);
+            if !hints.is_empty() {
+                eprintln!(
+                    "Hint: Similar package(s) available in enabled repositories: {}",
+                    hints.join(", ")
+                );
+            }
+            anyhow::anyhow!("Error: Unable to find a match: {spec}")
+        }
+        rum_solve::ResolveError::Unsatisfied {
+            package,
+            requirement,
+        } => {
+            eprintln!("Error: Problem: conflicting requests");
+            eprintln!("  - nothing provides {requirement} needed by {package}");
+            anyhow::anyhow!("Error: Problem: nothing provides {requirement} needed by {package}")
+        }
+    }
+}
+
+fn suggest_similar(spec: &str, metas: &[rum_repo::RepoMetadata]) -> Vec<String> {
+    let lower_spec = spec.to_lowercase();
+    let mut candidates: HashSet<String> = HashSet::new();
+
+    // Special aliases / drop-in replacements
+    if lower_spec == "redis" {
+        candidates.insert("valkey".to_string());
+    }
+
+    for m in metas {
+        for p in m.views() {
+            let name = p.name();
+            let lower_name = name.to_lowercase();
+            if lower_name.starts_with(&lower_spec)
+                || lower_name.ends_with(&lower_spec)
+                || lower_name.contains(&lower_spec)
+                || (lower_spec.len() >= 3 && levenshtein_close(&lower_spec, &lower_name))
+            {
+                candidates.insert(name.to_string());
+                if candidates.len() >= 20 {
+                    break;
+                }
+            }
+        }
+    }
+
+    let mut list: Vec<String> = candidates.into_iter().collect();
+    list.sort();
+    list.truncate(5);
+    list
+}
+
+fn levenshtein_close(a: &str, b: &str) -> bool {
+    let (len_a, len_b) = (a.len(), b.len());
+    if (len_a as isize - len_b as isize).abs() > 2 {
+        return false;
+    }
+    let mut prev = (0..=len_b).collect::<Vec<_>>();
+    let mut curr = vec![0; len_b + 1];
+    for (i, ca) in a.chars().enumerate() {
+        curr[0] = i + 1;
+        for (j, cb) in b.chars().enumerate() {
+            let cost = if ca == cb { 0 } else { 1 };
+            curr[j + 1] = (prev[j + 1] + 1)
+                .min(curr[j] + 1)
+                .min(prev[j] + cost);
+        }
+        prev.clone_from_slice(&curr);
+    }
+    prev[len_b] <= 2
 }
 
 /// Convert a scoped [`InstalledPkg`] into a solver [`PresentPackage`] (an

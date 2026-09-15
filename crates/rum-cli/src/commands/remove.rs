@@ -11,7 +11,7 @@ use rum_rpm::{Rpmdb, Transaction};
 
 pub fn run(packages: &[String], assume_yes: bool) -> anyhow::Result<()> {
     if packages.is_empty() {
-        anyhow::bail!("`rum remove` needs at least one package name");
+        anyhow::bail!("Error: No packages specified");
     }
 
     // Confirm the named packages are actually installed, and show NEVRAs.
@@ -29,7 +29,10 @@ pub fn run(packages: &[String], assume_yes: bool) -> anyhow::Result<()> {
         }
     }
     if !missing.is_empty() {
-        anyhow::bail!("not installed: {}", missing.join(", "));
+        for m in &missing {
+            eprintln!("No match for argument: {m}");
+        }
+        anyhow::bail!("Error: No packages marked for removal.");
     }
 
     // Protected-package safety (dnf's protected_packages): never remove a
@@ -37,7 +40,7 @@ pub fn run(packages: &[String], assume_yes: bool) -> anyhow::Result<()> {
     // kernel. rpm would happily erase these; we refuse before committing.
     let protected = sys::protected_packages();
     if let Some(spec) = packages.iter().find(|s| protected.contains(&s.as_str())) {
-        anyhow::bail!("refusing to remove protected package `{spec}`");
+        anyhow::bail!("Error: The following protected packages cannot be removed: {spec}");
     }
     if let Some(running) = sys::running_kernel_release() {
         for spec in packages {
@@ -48,7 +51,7 @@ pub fn run(packages: &[String], assume_yes: bool) -> anyhow::Result<()> {
                     .any(|p| p.nevra().contains(&running))
             {
                 anyhow::bail!(
-                    "refusing to remove the running kernel ({running}); boot another kernel first"
+                    "Error: The following protected packages cannot be removed: running kernel ({running})"
                 );
             }
         }

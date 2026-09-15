@@ -8,14 +8,16 @@ use rum_rpm::Rpmdb;
 
 pub fn run(packages: &[String]) -> anyhow::Result<()> {
     if packages.is_empty() {
-        anyhow::bail!("`rum info` needs at least one package name");
+        anyhow::bail!("Error: No packages specified");
     }
 
     let db = Rpmdb::open().map_err(|e| anyhow::anyhow!("cannot open rpmdb: {e}"))?;
     let installed = db.installed();
 
     let mut matched = Vec::new();
+    let mut missing = Vec::new();
     for pat in packages {
+        let mut hit = false;
         for p in &installed {
             if (glob::matches(pat, &p.name) || glob::matches(pat, &p.name_arch()))
                 && !matched
@@ -23,15 +25,19 @@ pub fn run(packages: &[String]) -> anyhow::Result<()> {
                     .any(|m: &&rum_rpm::Package| m.nevra() == p.nevra())
             {
                 matched.push(p);
+                hit = true;
             }
+        }
+        if !hit {
+            missing.push(pat.clone());
         }
     }
 
     if matched.is_empty() {
-        anyhow::bail!(
-            "No matching installed packages for: {}",
-            packages.join(", ")
-        );
+        for m in &missing {
+            eprintln!("No match for argument: {m}");
+        }
+        anyhow::bail!("Error: No matching Packages to list");
     }
 
     matched.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.arch.cmp(&b.arch)));
