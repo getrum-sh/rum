@@ -52,25 +52,37 @@ pub struct IPackage {
     pub files: Vec<Sym>,
 }
 
-/// A sorted index entry mapping an interned name/capability symbol to a package index.
+/// A bucket in the capability or package name index.
+///
+/// Each unique interned capability or name key has exactly one bucket.
+/// The package indices satisfying that key are stored contiguously in the
+/// companion `pkgs` array at `offset .. offset + count`.
+///
+/// Looking up a capability requires binary searching only unique capability keys
+/// in O(log U) time, followed by an O(1) contiguous slice read over `pkgs`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct IndexEntry {
+pub struct IndexBucket {
     pub key: Sym,
-    pub pkg_idx: u32,
+    pub offset: u32,
+    pub count: u32,
 }
 
 /// The whole cache: the string arena plus the interned packages,
-/// along with binary-searchable sorted name and capability indices.
+/// along with pre-grouped capability and name indices for O(1) provider slice access.
 /// This is the rkyv root written to `primary.rkyv`.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct Store {
     /// `strings[sym]` is the text for symbol `sym`.
     pub strings: Vec<String>,
     pub packages: Vec<IPackage>,
-    /// Index sorted alphabetically by package name (`strings[key]`).
-    pub name_index: Vec<IndexEntry>,
-    /// Index sorted alphabetically by capability/file provide name (`strings[key]`).
-    pub provide_index: Vec<IndexEntry>,
+    /// Unique package name buckets sorted alphabetically by name (`strings[key]`).
+    pub name_buckets: Vec<IndexBucket>,
+    /// Flat contiguous package indices referenced by `name_buckets`.
+    pub name_pkgs: Vec<u32>,
+    /// Unique capability/file provide buckets sorted alphabetically (`strings[key]`).
+    pub provide_buckets: Vec<IndexBucket>,
+    /// Flat contiguous package indices referenced by `provide_buckets`.
+    pub provide_pkgs: Vec<u32>,
 }
 
 /// Parse-time interner. Wraps `lasso::Rodeo`; `Spur` is confined here and only
@@ -109,51 +121,74 @@ impl Interner {
     }
 
     /// Finish, materializing the arena in symbol order alongside `packages`
-    /// and building the sorted name and provide indices for O(log N) binary search.
+    /// and building pre-grouped name and provide indices for O(1) provider slice access.
     pub fn into_store(self, packages: Vec<IPackage>) -> Store {
         let strings = self.into_strings();
 
-        let mut name_index = Vec::with_capacity(packages.len());
+        let mut raw_names: Vec<(Sym, u32)> = Vec::with_capacity(packages.len());
         for (idx, p) in packages.iter().enumerate() {
-            name_index.push(IndexEntry {
-                key: p.name,
-                pkg_idx: idx as u32,
-            });
+            raw_names.push((p.name, idx as u32));
         }
-        name_index.sort_by(|a, b| {
-            strings[a.key as usize]
-                .cmp(&strings[b.key as usize])
-                .then_with(|| a.pkg_idx.cmp(&b.pkg_idx))
+        raw_names.sort_by(|a, b| {
+            strings[a.0 as usize]
+                .cmp(&strings[b.0 as usize])
+                .then_with(|| a.1.cmp(&b.1))
         });
 
-        let mut provide_index = Vec::new();
+        let mut name_buckets = Vec::new();
+        let mut name_pkgs = Vec::with_capacity(raw_names.len());
+        let mut i = 0;
+        while i < raw_names.len() {
+            let key = raw_names[i].0;
+            let offset = name_pkgs.len() as u32;
+            let mut count = 0;
+            while i < raw_names.len() && raw_names[i].0 == key {
+                name_pkgs.push(raw_names[i].1);
+                count += 1;
+                i += 1;
+            }
+            name_buckets.push(IndexBucket { key, offset, count });
+        }
+
+        let mut raw_provides: Vec<(Sym, u32)> = Vec::new();
         for (idx, p) in packages.iter().enumerate() {
             let pkg_idx = idx as u32;
             for prov in &p.provides {
-                provide_index.push(IndexEntry {
-                    key: prov.name,
-                    pkg_idx,
-                });
+                raw_provides.push((prov.name, pkg_idx));
             }
             for &file_sym in &p.files {
-                provide_index.push(IndexEntry {
-                    key: file_sym,
-                    pkg_idx,
-                });
+                raw_provides.push((file_sym, pkg_idx));
             }
         }
-        provide_index.sort_by(|a, b| {
-            strings[a.key as usize]
-                .cmp(&strings[b.key as usize])
-                .then_with(|| a.pkg_idx.cmp(&b.pkg_idx))
+        raw_provides.sort_by(|a, b| {
+            strings[a.0 as usize]
+                .cmp(&strings[b.0 as usize])
+                .then_with(|| a.1.cmp(&b.1))
         });
-        provide_index.dedup_by(|a, b| a.key == b.key && a.pkg_idx == b.pkg_idx);
+        raw_provides.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
+
+        let mut provide_buckets = Vec::new();
+        let mut provide_pkgs = Vec::with_capacity(raw_provides.len());
+        let mut j = 0;
+        while j < raw_provides.len() {
+            let key = raw_provides[j].0;
+            let offset = provide_pkgs.len() as u32;
+            let mut count = 0;
+            while j < raw_provides.len() && raw_provides[j].0 == key {
+                provide_pkgs.push(raw_provides[j].1);
+                count += 1;
+                j += 1;
+            }
+            provide_buckets.push(IndexBucket { key, offset, count });
+        }
 
         Store {
             strings,
             packages,
-            name_index,
-            provide_index,
+            name_buckets,
+            name_pkgs,
+            provide_buckets,
+            provide_pkgs,
         }
     }
 }
@@ -190,26 +225,44 @@ impl ArchivedStore {
         self.packages.len()
     }
 
-    /// Find all package indices with exact package name `name` in O(log N) time.
+    /// Find all package indices with exact package name `name`.
+    /// Binary searches unique name buckets in O(log U) time and returns
+    /// an iterator over the pre-grouped contiguous slice of package indices in O(1).
     pub fn find_by_name<'a>(&'a self, name: &'a str) -> impl Iterator<Item = usize> + 'a {
-        let start = self
-            .name_index
-            .partition_point(|entry| self.sym(entry.key.to_native()) < name);
-        self.name_index[start..]
-            .iter()
-            .take_while(move |entry| self.sym(entry.key.to_native()) == name)
-            .map(|entry| entry.pkg_idx.to_native() as usize)
+        let pos = self
+            .name_buckets
+            .partition_point(|b| self.sym(b.key.to_native()) < name);
+        let slice = if pos < self.name_buckets.len()
+            && self.sym(self.name_buckets[pos].key.to_native()) == name
+        {
+            let b = &self.name_buckets[pos];
+            let start = b.offset.to_native() as usize;
+            let end = start + b.count.to_native() as usize;
+            &self.name_pkgs[start..end]
+        } else {
+            &[]
+        };
+        slice.iter().map(|idx| idx.to_native() as usize)
     }
 
-    /// Find all package indices providing capability or file `cap` in O(log N) time.
+    /// Find all package indices providing capability or file `cap`.
+    /// Binary searches unique capability buckets in O(log U) time and returns
+    /// an iterator over the pre-grouped contiguous slice of package indices in O(1).
     pub fn find_by_provide<'a>(&'a self, cap: &'a str) -> impl Iterator<Item = usize> + 'a {
-        let start = self
-            .provide_index
-            .partition_point(|entry| self.sym(entry.key.to_native()) < cap);
-        self.provide_index[start..]
-            .iter()
-            .take_while(move |entry| self.sym(entry.key.to_native()) == cap)
-            .map(|entry| entry.pkg_idx.to_native() as usize)
+        let pos = self
+            .provide_buckets
+            .partition_point(|b| self.sym(b.key.to_native()) < cap);
+        let slice = if pos < self.provide_buckets.len()
+            && self.sym(self.provide_buckets[pos].key.to_native()) == cap
+        {
+            let b = &self.provide_buckets[pos];
+            let start = b.offset.to_native() as usize;
+            let end = start + b.count.to_native() as usize;
+            &self.provide_pkgs[start..end]
+        } else {
+            &[]
+        };
+        slice.iter().map(|idx| idx.to_native() as usize)
     }
 }
 

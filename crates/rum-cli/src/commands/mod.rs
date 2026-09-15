@@ -4,6 +4,7 @@ pub mod check_update;
 pub mod clean;
 pub mod download;
 pub mod groups;
+pub mod history;
 pub mod info;
 pub mod install;
 pub mod list;

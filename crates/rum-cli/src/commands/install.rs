@@ -127,7 +127,38 @@ pub fn execute_transaction(
     // Download into rum's package cache, then commit.
     let pkgdir = sys::effective_cachedir("/var/cache/rum").join("packages");
     let fetched = download::fetch(resolution, &pkgdir)?;
-    commit_install(&fetched.files, &prunes, &installonly_files, nodocs)
+    commit_install(&fetched.files, &prunes, &installonly_files, nodocs)?;
+
+    let mut altered = Vec::new();
+    for p in resolution.winner_packages() {
+        let is_upg = db.as_ref().is_some_and(|d| d.is_installed(&p.name));
+        let state = if is_upg {
+            crate::history::PackageState::Upgraded
+        } else {
+            crate::history::PackageState::Installed
+        };
+        let is_explicit = targets.iter().any(|t| {
+            t == &p.name || t == &p.nevra() || t == &format!("{}.{}", p.name, p.arch)
+        });
+        altered.push(crate::history::AlteredPackage {
+            nevra: p.nevra(),
+            state,
+            is_explicit,
+        });
+    }
+    for (n, v, r) in &prunes {
+        altered.push(crate::history::AlteredPackage {
+            nevra: format!("{n}-{v}-{r}"),
+            state: crate::history::PackageState::Removed,
+            is_explicit: false,
+        });
+    }
+
+    let cmd_line = std::env::args().collect::<Vec<_>>().join(" ");
+    let action_label = if is_upgrade { "Upgrade" } else { "Install" };
+    crate::history::record_transaction(&cmd_line, action_label, targets, altered);
+
+    Ok(())
 }
 
 /// Is this fetched rpm file an install-only package (add without upgrade)?

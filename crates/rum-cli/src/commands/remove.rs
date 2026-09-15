@@ -69,11 +69,29 @@ pub fn run(packages: &[String], assume_yes: bool) -> anyhow::Result<()> {
     }
 
     let use_binary = std::env::var_os("RUM_USE_RPM_BINARY").is_some();
-    if sys::is_root() && !use_binary {
+    let res = if sys::is_root() && !use_binary {
         commit_remove_native(packages)
     } else {
         commit_remove_rpm_binary(packages)
+    };
+
+    if res.is_ok() {
+        let altered: Vec<crate::history::AlteredPackage> = matched
+            .iter()
+            .map(|pkg| {
+                let is_explicit = packages.iter().any(|p| p == pkg);
+                crate::history::AlteredPackage {
+                    nevra: pkg.clone(),
+                    state: crate::history::PackageState::Removed,
+                    is_explicit,
+                }
+            })
+            .collect();
+        let cmd_line = std::env::args().collect::<Vec<_>>().join(" ");
+        crate::history::record_transaction(&cmd_line, "Remove", packages, altered);
     }
+
+    res
 }
 
 /// Erase natively through librpm (`rpmtsRun`). Requires root.

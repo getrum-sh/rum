@@ -7,6 +7,7 @@
 
 mod commands;
 mod glob;
+mod history;
 mod sys;
 mod ui;
 
@@ -130,6 +131,22 @@ enum Command {
         #[arg(default_value = "all")]
         what: String,
     },
+
+    /// View or query transaction history (like `dnf history`).
+    History {
+        #[command(subcommand)]
+        action: Option<HistoryAction>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum HistoryAction {
+    /// List transaction history (default).
+    List,
+    /// Show detailed package breakdown for a transaction.
+    Info { id: Option<u64> },
+    /// Show intent tree view for transactions.
+    Tree { id: Option<u64> },
 }
 
 #[derive(Subcommand, Debug)]
@@ -196,6 +213,11 @@ fn main() -> anyhow::Result<()> {
         },
         Command::Upgrade { packages } => commands::upgrade::run(&packages, assume_yes, cli.nodocs),
         Command::Clean { what } => commands::clean::run(&what),
+        Command::History { action } => match action {
+            None | Some(HistoryAction::List) => commands::history::run_list(),
+            Some(HistoryAction::Info { id }) => commands::history::run_info(id),
+            Some(HistoryAction::Tree { id }) => commands::history::run_tree(id),
+        },
         other => {
             // Every other command is a recognized dnf verb we have not wired
             // up yet. Be explicit rather than silently doing nothing.
@@ -260,6 +282,7 @@ impl Command {
             Command::Upgrade { .. } => "upgrade",
             Command::Clean { .. } => "clean",
             Command::Group { .. } => "group",
+            Command::History { .. } => "history",
         }
     }
 }
