@@ -1,0 +1,60 @@
+name: Bug Report
+description: Report an issue or unexpected behavior in rum
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting an issue! Please provide as much detail as possible to help us reproduce and resolve the problem quickly.
+
+  - type: input
+    id: version
+    attributes:
+      label: Rum Version
+      description: What version of rum are you using? (Run `rum --version`)
+      placeholder: e.g. rum 0.1.0 (build 8)
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating System & Architecture
+      description: Operating system distribution, release, and CPU architecture (e.g. `uname -m`)
+      placeholder: e.g. Rocky Linux 9.4 (x86_64) / Amazon Linux 2023 (aarch64)
+    validations:
+      required: true
+
+  - type: input
+    id: command
+    attributes:
+      label: Command Executed
+      description: The exact command line string that triggered the issue
+      placeholder: e.g. sudo rum install redis --no-weak-deps
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Problem Description
+      description: Describe what happened and what you expected to happen instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Log Output
+      description: Please copy and paste any terminal output or error messages (run with `-v` or `-vv` for debug logs if applicable).
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: dnf_comparison
+    attributes:
+      label: DNF / YUM Behavior (Optional)
+      description: Does `dnf` or `yum` succeed or produce different output for the same command on this host?
+      placeholder: e.g. dnf install redis succeeds and installs redis-7.0.12-1.el9.x86_64
