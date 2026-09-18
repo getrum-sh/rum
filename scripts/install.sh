@@ -19,6 +19,12 @@ err() { echo "rum-install: $*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
 have curl || err "curl is required"
+
+# --- distribution compatibility check ----------------------------------------
+if [ -f /etc/alpine-release ] || ( have ldd && ldd --version 2>&1 | grep -iq musl ); then
+  err "Alpine Linux (musl libc) is not supported; rum requires a glibc-based RPM distribution (RHEL, Rocky, AlmaLinux, Fedora, Amazon Linux, CentOS)"
+fi
+
 SHA=""
 if have sha256sum; then SHA="sha256sum -c"; elif have shasum; then SHA="shasum -a 256 -c"; fi
 
