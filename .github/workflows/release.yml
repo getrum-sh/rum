@@ -71,13 +71,16 @@ jobs:
           tar -C dist -czf "${name}.tar.gz" "${name}"
           sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256"
 
+          # Publish raw standalone executable for tar-free one-line curl installs
+          cp target/release/rum "${name}"
+          sha256sum "${name}" > "${name}.sha256"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: rum-el${{ matrix.era.el }}-${{ matrix.platform.arch }}
           path: |
-            rum-*.tar.gz
-            rum-*.tar.gz.sha256
+            rum-*
           if-no-files-found: error
 
   # Publish a single release carrying every era's and architecture's assets.
@@ -107,6 +110,5 @@ jobs:
           tag_name: v${{ steps.meta.outputs.version }}.${{ github.run_number }}
           name: rum v${{ steps.meta.outputs.version }} (build ${{ github.run_number }})
           files: |
-            artifacts/rum-*.tar.gz
-            artifacts/rum-*.tar.gz.sha256
+            artifacts/rum-*
           generate_release_notes: true
